@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,800;1,400;1,800&family=Manrope:wght@300;400;500&family=Poppins:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: 'Playfair Display', serif;
+  --font-sans: 'Manrope', sans-serif;
+}
+
+.dashboard-root,
+.dashboard-root * {
+  font-family: 'Poppins', sans-serif !important;
+}
+
+/* Default Light Theme Variables */
+:root {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --dashboard-bg: #f0f0f2;
+  --card-bg: #ffffff;
+  --border-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Explicit light class — overrides media query */
+.light {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --dashboard-bg: #f0f0f2;
+  --card-bg: #ffffff;
+  --border-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Dark Theme Variables */
+.dark {
+  --bg: #050505;
+  --fg: #ffffff;
+  --dashboard-bg: #0f0f11;
+  --card-bg: #1a1a1c;
+  --border-color: rgba(255, 255, 255, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --bg: #050505;
+    --fg: #ffffff;
+    --dashboard-bg: #0f0f11;
+    --card-bg: #1a1a1c;
+    --border-color: rgba(255, 255, 255, 0.06);
+  }
+}
+
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: 'Manrope', sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+
+::-moz-selection {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+::selection {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.text-stroke {
+  -webkit-text-stroke: 1px var(--bg);
+  color: transparent;
+}
+
+.text-stroke-white {
+  -webkit-text-stroke: 1px var(--fg);
+  color: transparent;
+}
+
+:root {
+  --fs--1: clamp(0.8rem, 1.1266rem + -1.3329vw, 1.1253rem);
+  --fs-0: clamp(1rem, 1.502rem + -2.0488vw, 1.5rem);
+  --fs-1: clamp(1.25rem, 2.0024rem + -3.0712vw, 1.9995rem);
+  --fs-4: clamp(2.4414rem, 4.745rem + -9.4025vw, 4.736rem);
+  --fs-8: clamp(5.9605rem, 14.9885rem + -36.8492vw, 14.9531rem);
+}
+
+/* Hide scrollbar BAR globally — but keep mouse-wheel scrolling working */
+html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+html, body { scrollbar-width: none; -ms-overflow-style: none; }
