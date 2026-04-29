@@ -1,6 +1,55 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../supabaseClient';
 
 const OrderManagement = () => {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchOrders();
+
+    // Set up real-time subscription
+    const subscription = supabase
+      .channel('orders_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, payload => {
+        fetchOrders();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, []);
+
+  const fetchOrders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setOrders(data || []);
+    } catch (err) {
+      console.error('Error fetching orders:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'pending':
+        return <span className="bg-yellow-500/20 text-yellow-500 rounded-full px-3 py-1 text-[9px] uppercase font-medium">Pending</span>;
+      case 'batched':
+        return <span className="bg-[var(--fg)]/10 text-[var(--fg)] rounded-full px-3 py-1 text-[9px] uppercase font-medium">Batched</span>;
+      case 'out for delivery':
+        return <span className="bg-[var(--fg)] text-[var(--bg)] rounded-full px-3 py-1 text-[9px] uppercase font-medium">Out for Delivery</span>;
+      default:
+        return <span className="bg-gray-500/20 text-gray-500 rounded-full px-3 py-1 text-[9px] uppercase font-medium">{status || 'Unknown'}</span>;
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
       
@@ -40,23 +89,35 @@ const OrderManagement = () => {
                 <tr className="border-b border-[var(--fg)]/10 text-[9px] uppercase tracking-widest opacity-50">
                   <th className="p-4 font-normal">Order ID</th>
                   <th className="p-4 font-normal">Customer</th>
-                  <th className="p-4 font-normal">Zone / Pin</th>
+                  <th className="p-4 font-normal">Address / Pin</th>
+                  <th className="p-4 font-normal">Time Window</th>
                   <th className="p-4 font-normal">Status</th>
                 </tr>
               </thead>
               <tbody className="text-xs">
-                <tr className="border-b border-[var(--fg)]/5 hover:bg-[var(--fg)]/5 transition-colors">
-                  <td className="p-4 font-medium">ORD-9012</td><td className="p-4">Arjun M.</td><td className="p-4 opacity-70">Zone A (560001)</td>
-                  <td className="p-4"><span className="bg-[var(--fg)] rounded-full text-[var(--bg)] px-3 py-1 text-[9px] uppercase font-medium">Out for Delivery</span></td>
-                </tr>
-                <tr className="border-b border-[var(--fg)]/5 hover:bg-[var(--fg)]/5 transition-colors">
-                  <td className="p-4 font-medium">ORD-9013</td><td className="p-4">Priya S.</td><td className="p-4 opacity-70">Zone B (560034)</td>
-                  <td className="p-4"><span className="bg-[var(--fg)]/10 rounded-full px-3 py-1 text-[9px] uppercase font-medium">Batched</span></td>
-                </tr>
-                <tr className="border-b border-[var(--fg)]/5 hover:bg-[var(--fg)]/5 bg-red-500/5 transition-colors">
-                  <td className="p-4 font-medium">ORD-9014</td><td className="p-4">Rahul K.</td><td className="p-4 opacity-70">Zone A (560002)</td>
-                  <td className="p-4 text-red-500"><span className="bg-red-500/20 rounded-full px-3 py-1 text-[9px] uppercase font-medium">Partial (OOS)</span></td>
-                </tr>
+                {loading ? (
+                  <tr>
+                    <td colSpan="5" className="p-4 text-center opacity-50 text-[10px] uppercase tracking-widest">
+                      Loading orders...
+                    </td>
+                  </tr>
+                ) : orders.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="p-4 text-center opacity-50 text-[10px] uppercase tracking-widest">
+                      No orders found.
+                    </td>
+                  </tr>
+                ) : (
+                  orders.map(order => (
+                    <tr key={order.id} className="border-b border-[var(--fg)]/5 hover:bg-[var(--fg)]/5 transition-colors">
+                      <td className="p-4 font-medium">ORD-{order.id}</td>
+                      <td className="p-4">{order.customer || 'Unknown'}</td>
+                      <td className="p-4 opacity-70 max-w-[150px] truncate" title={order.address}>{order.address || 'N/A'}</td>
+                      <td className="p-4 opacity-70 capitalize">{order.time_window || 'N/A'}</td>
+                      <td className="p-4">{getStatusBadge(order.status)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

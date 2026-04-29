@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Overview from './dashboard/Overview';
 import OrderManagement from './dashboard/OrderManagement';
 import Routing from './dashboard/Routing';
+import Batching from './dashboard/Batching';
 import Intelligence from './dashboard/Intelligence';
 import Analytics from './dashboard/Analytics';
 import Fleet from './dashboard/Fleet';
@@ -37,7 +38,7 @@ const renderPage = (tab, theme) => {
     case 'Routes':         return <Routing />;
     case 'Delays & Risks': return <Intelligence />;
     case 'Analytics':      return <Analytics />;
-    case 'Batching':       return <Fleet />;
+    case 'Batching':       return <Batching />;
     case 'Costs':          return <CourierPortal />;
     case 'Returns':        return <Returns />;
     case 'Team':           return <Team />;

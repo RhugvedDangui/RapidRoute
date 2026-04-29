@@ -1,289 +1,294 @@
 """
 RapidRoute - Phase 1: Intelligent Batching
-K-Means clustering for optimal delivery route batching
-Using direct HTTP requests to avoid dependency issues
+==========================================
+Groups pending orders into batches using:
+  - K-Means geographic clustering
+  - Time-window refinement (morning / afternoon / evening)
+  - Vehicle capacity constraints (greedy bin-packing)
+  - Smallest-fit vehicle assignment
+
+Route optimisation is handled separately by optimize_routes.py (Phase 2).
 """
 
-import os
-import sys
-import uuid
-import json
-import requests
+import os, sys, uuid, json
 import numpy as np
 import pandas as pd
+import requests
+from math import radians, sin, cos, sqrt, atan2, ceil
 from datetime import datetime
 from sklearn.cluster import KMeans
 from dotenv import load_dotenv
 
-# Fix Windows console encoding for emoji support
-if sys.platform == 'win32':
+# ── Windows UTF-8 fix ──────────────────────────────────────────────
+if sys.platform == "win32":
     import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer, "strict")
 
-# Load environment variables
 load_dotenv()
 
-# Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-# Constants
 MAX_ORDERS_PER_BATCH = 10
-API_HEADERS = {
-    "apikey": SUPABASE_KEY,
+DEFAULT_COST_PER_KM  = 15.0   # fallback ₹/km
+CO2_PER_KM           = 0.21   # kg CO₂/km
+
+HEADERS = {
+    "apikey":        SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation"
+    "Content-Type":  "application/json",
+    "Prefer":        "return=representation",
 }
 
 
-def get_pending_orders():
-    """
-    Fetch all pending orders with valid coordinates from Supabase.
-    
-    Returns:
-        pd.DataFrame: DataFrame containing pending orders with lat/lng
-    """
-    print("📦 Fetching pending orders from Supabase...")
-    
-    url = f"{SUPABASE_URL}/rest/v1/orders?status=eq.pending&select=*"
-    
-    try:
-        response = requests.get(url, headers=API_HEADERS)
-        response.raise_for_status()
-        data = response.json()
-    except Exception as e:
-        print(f"❌ Error fetching orders: {e}")
-        return pd.DataFrame()
-    
+# ══════════════════════════════════════════════════════════════════
+# GEOMETRY (used only for carbon estimate in batch metrics)
+# ══════════════════════════════════════════════════════════════════
+
+def haversine(lat1, lng1, lat2, lng2) -> float:
+    R = 6371.0
+    lat1, lng1, lat2, lng2 = map(radians, [lat1, lng1, lat2, lng2])
+    dlat, dlng = lat2 - lat1, lng2 - lng1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlng/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1-a))
+
+
+# ══════════════════════════════════════════════════════════════════
+# DATA FETCHING
+# ══════════════════════════════════════════════════════════════════
+
+def fetch_orders() -> pd.DataFrame:
+    print("📦 Fetching pending orders...")
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/orders?status=eq.pending&select=*",
+        headers=HEADERS,
+    )
+    r.raise_for_status()
+    data = r.json()
     if not data:
-        print("⚠️  No pending orders found.")
+        print("⚠️  No pending orders.")
         return pd.DataFrame()
-    
-    df = pd.DataFrame(data)
-    
-    # Filter out orders without valid coordinates
-    df = df.dropna(subset=['lat', 'lng'])
-    
-    print(f"✅ Found {len(df)} pending orders with valid coordinates")
+    df = pd.DataFrame(data).dropna(subset=["lat", "lng"])
+    df["weight_kg"]   = pd.to_numeric(df.get("weight_kg",   1.0), errors="coerce").fillna(1.0)
+    df["time_window"] = df.get("time_window", "other").fillna("other")
+    print(f"✅ {len(df)} orders | {df['weight_kg'].sum():.1f} kg total")
     return df
 
 
-def calculate_k(df):
-    """
-    Calculate optimal number of clusters based on total orders.
-    Formula: k = ceil(total_orders / MAX_ORDERS_PER_BATCH)
-    
-    Args:
-        df (pd.DataFrame): DataFrame of orders
-        
-    Returns:
-        int: Number of clusters
-    """
-    total_orders = len(df)
-    
-    if total_orders == 0:
-        return 0
-    
-    k = int(np.ceil(total_orders / MAX_ORDERS_PER_BATCH))
-    print(f"📊 Calculated k = {k} clusters for {total_orders} orders")
+def fetch_vehicles() -> list:
+    print("🚗 Fetching active vehicles...")
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/vehicles"
+        "?active=eq.true&select=*&order=capacity_kg.asc",
+        headers=HEADERS,
+    )
+    r.raise_for_status()
+    vehicles = r.json() or []
+    for v in vehicles:
+        print(f"   {v.get('name')} | {v.get('type')} | "
+              f"{v.get('capacity_kg')} kg | ₹{v.get('cost_per_km', DEFAULT_COST_PER_KM)}/km")
+    print(f"✅ {len(vehicles)} vehicles found")
+    return vehicles
+
+
+# ══════════════════════════════════════════════════════════════════
+# CLUSTERING
+# ══════════════════════════════════════════════════════════════════
+
+def compute_k(df: pd.DataFrame, max_cap_kg: float) -> int:
+    """k = max(ceil(n/MAX_ORDERS), ceil(total_weight/max_vehicle_cap))"""
+    k_orders = ceil(len(df) / MAX_ORDERS_PER_BATCH)
+    k_weight = ceil(df["weight_kg"].sum() / max_cap_kg) if max_cap_kg else 1
+    k = max(1, k_orders, k_weight)
+    print(f"📊 k={k}  (by-orders={k_orders}, by-weight={k_weight})")
     return k
 
 
-def apply_clustering(df):
-    """
-    Apply K-Means clustering to group orders by geographic proximity.
-    
-    Args:
-        df (pd.DataFrame): DataFrame with lat/lng columns
-        
-    Returns:
-        pd.DataFrame: DataFrame with added 'cluster_id' column
-    """
-    k = calculate_k(df)
-    
-    if k == 0:
-        print("⚠️  No orders to cluster")
-        return df
-    
-    print(f"🔄 Running K-Means clustering with k={k}...")
-    
-    # Prepare coordinate features
-    coords = df[['lat', 'lng']].values
-    
-    # Initialize and run K-Means
-    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-    df['cluster_id'] = kmeans.fit_predict(coords)
-    
-    print(f"✅ Clustering complete. Created {k} geographic clusters")
+def cluster(df: pd.DataFrame, max_cap_kg: float) -> pd.DataFrame:
+    k = compute_k(df, max_cap_kg)
+    print(f"🔄 K-Means with k={k}...")
+    df = df.copy()
+    df["cluster_id"] = KMeans(
+        n_clusters=k, random_state=42, n_init=10
+    ).fit_predict(df[["lat", "lng"]].values)
+    print(f"✅ {k} geographic clusters created")
     return df
 
 
-def finalize_batches(df):
+# ══════════════════════════════════════════════════════════════════
+# CAPACITY-AWARE BATCH FINALISATION
+# ══════════════════════════════════════════════════════════════════
+
+# Round-robin counter per capacity tier (e.g. all 20-kg bikes share one index)
+_rr_index: dict = {}
+
+def assign_vehicle(total_weight_kg: float, vehicles: list):
     """
-    Refine clusters by splitting based on time_window.
-    Ensures each batch has same time window and max 10 orders.
-    
-    Args:
-        df (pd.DataFrame): DataFrame with cluster_id and time_window
-        
-    Returns:
-        list: List of DataFrames, each representing a final batch
+    Smallest-fit + round-robin:
+      1. Find the minimum capacity tier that fits the batch weight.
+      2. Collect all vehicles in that tier.
+      3. Rotate through them evenly across successive calls.
     """
-    print("🔧 Refining batches by time window...")
-    
-    final_batches = []
-    
-    # Group by K-Means cluster AND time window
-    grouped = df.groupby(['cluster_id', 'time_window'])
-    
-    for (cluster, window), group in grouped:
-        # If any sub-group exceeds MAX_ORDERS_PER_BATCH, split it
-        for i in range(0, len(group), MAX_ORDERS_PER_BATCH):
-            batch_chunk = group.iloc[i : i + MAX_ORDERS_PER_BATCH]
-            final_batches.append(batch_chunk)
-            print(f"  📦 Batch: Cluster {cluster}, {window}, {len(batch_chunk)} orders")
-    
-    print(f"✅ Finalized {len(final_batches)} batches")
-    return final_batches
+    sorted_v = sorted(vehicles, key=lambda x: x["capacity_kg"])
+
+    # Find min capacity that fits
+    min_cap = None
+    for v in sorted_v:
+        if v["capacity_kg"] >= total_weight_kg:
+            min_cap = v["capacity_kg"]
+            break
+
+    if min_cap is None:
+        # Nothing fits exactly — use the largest available
+        return sorted_v[-1] if sorted_v else None
+
+    # All vehicles in the same capacity tier
+    tier = [v for v in sorted_v if v["capacity_kg"] == min_cap]
+
+    # Round-robin within the tier
+    idx = _rr_index.get(min_cap, 0) % len(tier)
+    _rr_index[min_cap] = idx + 1
+    return tier[idx]
 
 
-def calculate_batch_metrics(batch_df):
+def bin_pack(group: pd.DataFrame, max_weight_kg: float) -> list:
+    """Greedy bin-packing within a cluster×time-window group."""
+    bins, cur, cur_w = [], [], 0.0
+    for _, row in group.iterrows():
+        w = float(row["weight_kg"])
+        if cur and (cur_w + w > max_weight_kg or len(cur) >= MAX_ORDERS_PER_BATCH):
+            bins.append(pd.DataFrame(cur))
+            cur, cur_w = [], 0.0
+        cur.append(row)
+        cur_w += w
+    if cur:
+        bins.append(pd.DataFrame(cur))
+    return bins
+
+
+def finalise_batches(df: pd.DataFrame, vehicles: list) -> list:
+    """Returns list of (batch_df, vehicle | None)."""
+    print("🔧 Finalising batches (cluster × time-window × capacity)...")
+    max_cap = max((v["capacity_kg"] for v in vehicles), default=50)
+    result  = []
+    for (cid, tw), grp in df.groupby(["cluster_id", "time_window"]):
+        for sub in bin_pack(grp, max_cap):
+            total_w = sub["weight_kg"].sum()
+            vehicle = assign_vehicle(total_w, vehicles)
+            vname   = vehicle["name"] if vehicle else "Unassigned"
+            print(f"  📦 Cluster {cid} | {tw} | {len(sub)} orders | {total_w:.1f} kg → {vname}")
+            result.append((sub, vehicle))
+    print(f"✅ {len(result)} batches finalised")
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════
+# PRELIMINARY METRICS (rough estimate — optimize_routes.py refines)
+# ══════════════════════════════════════════════════════════════════
+
+def prelim_metrics(batch_df: pd.DataFrame, vehicle) -> dict:
     """
-    Calculate estimated distance, time, and cost for a batch.
-    Uses Haversine formula for distance calculation.
-    
-    Args:
-        batch_df (pd.DataFrame): DataFrame of orders in the batch
-        
-    Returns:
-        dict: Metrics including distance, time, and cost
+    Estimate distance as sum of consecutive haversine distances (unoptimised order).
+    optimize_routes.py will overwrite these with OR-Tools results.
     """
-    def haversine(lat1, lng1, lat2, lng2):
-        """Calculate distance between two points using Haversine formula"""
-        R = 6371  # Earth radius in km
-        
-        lat1, lng1, lat2, lng2 = map(np.radians, [lat1, lng1, lat2, lng2])
-        dlat = lat2 - lat1
-        dlng = lng2 - lng1
-        
-        a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlng/2)**2
-        c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
-        
-        return R * c
-    
-    # Simple estimation: sum of distances between consecutive points
-    total_distance = 0
-    coords = batch_df[['lat', 'lng']].values
-    
-    for i in range(len(coords) - 1):
-        dist = haversine(coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1])
-        total_distance += dist
-    
-    # Estimated time: distance / 30 km/h + 5 min per stop
-    estimated_time = int((total_distance / 30) * 60 + len(batch_df) * 5)
-    
-    # Estimated cost: distance * ₹8/km
-    estimated_cost = round(total_distance * 8, 2)
-    
+    coords   = list(zip(batch_df["lat"].values, batch_df["lng"].values))
+    raw_km   = sum(
+        haversine(coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1])
+        for i in range(len(coords)-1)
+    ) if len(coords) > 1 else 0.0
+
+    cpm       = float(vehicle["cost_per_km"]) if vehicle else DEFAULT_COST_PER_KM
+    est_cost  = round(raw_km * cpm, 2)
+    est_time  = int((raw_km / 30) * 60 + len(batch_df) * 5)
+
+    # Rough carbon estimate: individual round trips vs raw sequential
+    clat, clng = batch_df["lat"].mean(), batch_df["lng"].mean()
+    indiv_km   = sum(haversine(clat, clng, r.lat, r.lng) * 2 for _, r in batch_df.iterrows())
+    carbon     = round(max(0, indiv_km - raw_km) * CO2_PER_KM, 3)
+
     return {
-        "estimated_distance": round(total_distance, 2),
-        "estimated_time": estimated_time,
-        "estimated_cost": estimated_cost
+        "estimated_distance": round(raw_km, 2),
+        "estimated_time":     est_time,
+        "estimated_cost":     est_cost,
+        "carbon_saved":       carbon,
     }
 
 
-def save_batches_to_db(final_batches):
-    """
-    Save finalized batches to Supabase using direct HTTP requests.
-    Creates batch records and updates order statuses.
-    
-    Args:
-        final_batches (list): List of batch DataFrames
-    """
-    print("\n💾 Saving batches to Supabase...")
-    
-    for idx, batch_df in enumerate(final_batches, 1):
+# ══════════════════════════════════════════════════════════════════
+# PERSISTENCE
+# ══════════════════════════════════════════════════════════════════
+
+def save(final_batches: list):
+    print(f"\n💾 Saving {len(final_batches)} batches...")
+    for idx, (batch_df, vehicle) in enumerate(final_batches, 1):
         batch_id = f"B-{uuid.uuid4().hex[:6].upper()}"
-        
-        # Calculate batch metrics
-        metrics = calculate_batch_metrics(batch_df)
-        
-        # 1. Insert into 'batches' table
-        batch_data = {
-            "id": batch_id,
-            "total_orders": len(batch_df),
-            "created_at": datetime.utcnow().isoformat(),
-            "estimated_distance": metrics["estimated_distance"],
-            "estimated_time": metrics["estimated_time"],
-            "estimated_cost": metrics["estimated_cost"]
+        m        = prelim_metrics(batch_df, vehicle)
+        vid      = vehicle["id"] if vehicle else None
+        vname    = vehicle["name"] if vehicle else "None"
+
+        # 1. Insert batch row
+        batch_row = {
+            "id":                 batch_id,
+            "total_orders":       len(batch_df),
+            "created_at":         datetime.utcnow().isoformat(),
+            "estimated_distance": m["estimated_distance"],
+            "estimated_time":     m["estimated_time"],
+            "estimated_cost":     m["estimated_cost"],
+            "carbon_saved":       m["carbon_saved"],
+            "vehicle_id":         vid,
         }
-        
         try:
-            url = f"{SUPABASE_URL}/rest/v1/batches"
-            response = requests.post(url, headers=API_HEADERS, json=batch_data)
-            response.raise_for_status()
-            print(f"  ✅ Batch {idx}/{len(final_batches)}: {batch_id} - {len(batch_df)} orders, {metrics['estimated_distance']} km, ₹{metrics['estimated_cost']}")
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/batches",
+                headers=HEADERS, json=batch_row,
+            ).raise_for_status()
+            print(f"  ✅ [{idx}] {batch_id} | {len(batch_df)} orders | "
+                  f"{m['estimated_distance']} km (prelim) | 🚛 {vname}")
         except Exception as e:
-            print(f"  ❌ Error creating batch {batch_id}: {e}")
+            print(f"  ❌ Batch insert failed: {e}")
             continue
-        
-        # 2. Update 'orders' table
-        order_ids = batch_df['id'].tolist()
-        
-        try:
-            # Update each order individually (simpler than bulk update)
-            for order_id in order_ids:
-                url = f"{SUPABASE_URL}/rest/v1/orders?id=eq.{order_id}"
-                update_data = {
-                    "batch_id": batch_id,
-                    "status": "batched"
-                }
-                response = requests.patch(url, headers=API_HEADERS, json=update_data)
-                response.raise_for_status()
-        except Exception as e:
-            print(f"  ❌ Error updating orders for batch {batch_id}: {e}")
-    
-    print(f"\n🎉 Successfully created {len(final_batches)} batches!")
+
+        # 2. Update orders → status=batched, batch_id
+        for _, row in batch_df.iterrows():
+            try:
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/orders?id=eq.{row['id']}",
+                    headers=HEADERS,
+                    json={"batch_id": batch_id, "status": "batched"},
+                ).raise_for_status()
+            except Exception as e:
+                print(f"     ⚠️  Order update failed ({row['id']}): {e}")
 
 
-def run_batching_pipeline():
-    """
-    Main pipeline: Fetch → Cluster → Refine → Save
-    """
+# ══════════════════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════════════════
+
+def run():
     print("\n" + "="*60)
-    print("🚀 RapidRoute - Intelligent Batching Pipeline")
+    print("🚀 RapidRoute — Phase 1: Batching")
     print("="*60 + "\n")
-    
-    # Validate environment variables
+
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("❌ ERROR: Missing environment variables")
-        print("Please check your .env file")
+        print("❌ Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env")
         return
-    
-    print(f"🔗 Connecting to: {SUPABASE_URL}")
-    
-    # Step 1: Fetch pending orders
-    df = get_pending_orders()
-    
-    if df.empty:
-        print("\n⚠️  No orders to batch. Exiting.")
+
+    orders   = fetch_orders()
+    if orders.empty:
         return
-    
-    # Step 2: Apply K-Means clustering
-    df = apply_clustering(df)
-    
-    # Step 3: Refine by time window
-    final_batches = finalize_batches(df)
-    
-    # Step 4: Save to database
-    save_batches_to_db(final_batches)
-    
+
+    vehicles = fetch_vehicles()
+    max_cap  = max((v["capacity_kg"] for v in vehicles), default=50)
+
+    orders        = cluster(orders, max_cap)
+    final_batches = finalise_batches(orders, vehicles)
+    save(final_batches)
+
     print("\n" + "="*60)
-    print("✅ Batching pipeline completed successfully!")
+    print("✅ Batching complete! Run optimize_routes.py for Phase 2.")
     print("="*60 + "\n")
 
 
 if __name__ == "__main__":
-    run_batching_pipeline()
+    run()

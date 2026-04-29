@@ -3,17 +3,26 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
 
+const cors = require('cors');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+app.use(cors());
 app.use(express.json());
 app.use(express.raw({ type: 'application/json' }));
 
-// Initialize Supabase client
+// Supabase — anon key for read/webhook operations
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
+);
+
+// Supabase — service role key for privileged writes (dispatch, POD)
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // Helper function: Assign time window based on hour
@@ -82,6 +91,20 @@ app.post('/webhook/order', async (req, res) => {
     // Determine time window
     const timeWindow = getTimeWindow(dateCreated);
 
+    // --- New fields ---
+    // Weight in kg (from WooCommerce meta_data or default to 1.0)
+    const weightKg = order.weight_kg
+      ?? order.meta_data?.find(m => m.key === 'weight_kg')?.value
+      ?? 1.0;
+
+    // Payment type: 'cod' or 'prepaid' (WooCommerce payment_method tells us)
+    const paymentType = (order.payment_method === 'cod') ? 'cod' : 'prepaid';
+
+    // Is this a return order?
+    const isReturn = !!(order.is_return
+      ?? order.meta_data?.find(m => m.key === 'is_return')?.value
+      ?? false);
+
     // Prepare order data for Supabase (matching the schema)
     const orderData = {
       id: orderId,
@@ -93,7 +116,12 @@ app.post('/webhook/order', async (req, res) => {
       status: 'pending',
       time_window: timeWindow,
       created_at: dateCreated,
-      batch_id: null
+      batch_id: null,
+      // New columns
+      weight_kg: parseFloat(weightKg) || 1.0,
+      payment_type: paymentType,
+      is_return: isReturn,
+      proof_of_delivery: null  // Filled later on delivery confirmation
     };
 
     // Insert into Supabase
@@ -107,7 +135,7 @@ app.post('/webhook/order', async (req, res) => {
       return res.status(500).json({ error: 'Failed to save order', details: error.message });
     }
 
-    console.log(`Order ${orderId} saved successfully with coordinates (${lat}, ${lng})`);
+    console.log(`✅ Order ${orderId} saved — coords (${lat}, ${lng}), weight ${weightKg}kg, ${paymentType}, return=${isReturn}`);
     
     res.status(200).json({
       success: true,
@@ -116,12 +144,111 @@ app.post('/webhook/order', async (req, res) => {
       customer: customerName,
       time_window: timeWindow,
       coordinates: { lat, lng },
+      weight_kg: parseFloat(weightKg) || 1.0,
+      payment_type: paymentType,
+      is_return: isReturn,
       status: 'pending'
     });
 
   } catch (error) {
     console.error('Webhook processing error:', error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// PATCH /orders/:id/pod - Upload Proof of Delivery URL
+app.patch('/orders/:id/pod', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { proof_of_delivery } = req.body;
+
+    if (!proof_of_delivery) {
+      return res.status(400).json({ error: 'proof_of_delivery URL is required' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('orders')
+      .update({ proof_of_delivery, status: 'delivered' })
+      .eq('id', id)
+      .select();
+
+    if (error) throw error;
+
+    console.log(`📷 POD recorded for order ${id}`);
+    res.status(200).json({ success: true, order: data[0] });
+  } catch (error) {
+    console.error('POD update error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// POST /batches/:id/dispatch — manager approves batch, moves orders → dispatched
+// Status flow: pending → batched → dispatched → out_for_delivery (driver app) → delivered
+app.post('/batches/:id/dispatch', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data: orders, error: oErr } = await supabaseAdmin
+      .from('orders')
+      .select('id')
+      .eq('batch_id', id);
+    if (oErr) throw oErr;
+
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({ error: `No orders found for batch ${id}` });
+    }
+
+    const orderIds = orders.map(o => o.id);
+    const { error: uErr } = await supabaseAdmin
+      .from('orders')
+      .update({ status: 'dispatched' })   // driver app later moves to out_for_delivery
+      .in('id', orderIds);
+    if (uErr) throw uErr;
+
+    // Also update the batch status
+    await supabaseAdmin.from('batches').update({ status: 'dispatched' }).eq('id', id);
+
+    console.log(`✅ Batch ${id} dispatched — ${orders.length} orders → dispatched`);
+    res.status(200).json({
+      success: true,
+      batch_id: id,
+      dispatched_orders: orders.length,
+    });
+  } catch (err) {
+    console.error('Dispatch error:', err);
+    res.status(500).json({ error: 'Dispatch failed', details: err.message });
+  }
+});
+
+// POST /batches/:id/start — driver starts the trip (called from driver app)
+// Moves orders: dispatched → out_for_delivery
+app.post('/batches/:id/start', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data: orders, error: oErr } = await supabaseAdmin
+      .from('orders')
+      .select('id')
+      .eq('batch_id', id)
+      .eq('status', 'dispatched');  // only move dispatched orders
+    if (oErr) throw oErr;
+
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({ error: `No dispatched orders found for batch ${id}` });
+    }
+
+    const { error: uErr } = await supabaseAdmin
+      .from('orders')
+      .update({ status: 'out_for_delivery' })
+      .in('id', orders.map(o => o.id));
+    if (uErr) throw uErr;
+
+    // Also update the batch status
+    await supabaseAdmin.from('batches').update({ status: 'in_progress' }).eq('id', id);
+
+    console.log(`🚚 Batch ${id} started — ${orders.length} orders → out_for_delivery`);
+    res.status(200).json({ success: true, batch_id: id, orders_started: orders.length });
+  } catch (err) {
+    console.error('Start error:', err);
+    res.status(500).json({ error: 'Start failed', details: err.message });
   }
 });
 
