@@ -11,22 +11,25 @@
   font-family: 'Poppins', sans-serif !important;
 }
 
-/* Default Light Theme Variables */
+/* Premium Light Theme Variables (60-30-10 Rule) */
 :root {
-  --bg: #ffffff;
-  --fg: #0a0a0a;
-  --dashboard-bg: #f0f0f2;
-  --card-bg: #ffffff;
-  --border-color: rgba(0, 0, 0, 0.08);
+  /* 60% Dominant: Main Background */
+  --bg: #F3F4F6; 
+  /* 30% Secondary: Dashboard/Surfaces/Cards */
+  --dashboard-bg: #E5E7EB; 
+  --card-bg: #FFFFFF;
+  --border-color: rgba(17, 24, 39, 0.1);
+  /* 10% Accent/Text: High Contrast Foreground */
+  --fg: #111827; 
 }
 
 /* Explicit light class — overrides media query */
 .light {
-  --bg: #ffffff;
-  --fg: #0a0a0a;
-  --dashboard-bg: #f0f0f2;
-  --card-bg: #ffffff;
-  --border-color: rgba(0, 0, 0, 0.08);
+  --bg: #F3F4F6;
+  --dashboard-bg: #E5E7EB;
+  --card-bg: #FFFFFF;
+  --border-color: rgba(17, 24, 39, 0.1);
+  --fg: #111827;
 }
 
 /* Dark Theme Variables */

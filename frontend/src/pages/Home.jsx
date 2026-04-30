@@ -56,23 +56,11 @@ function Home() {
             </motion.div>
           </motion.div>
 
-          <div className="relative h-[60vh] w-full border border-[var(--fg)]/20 bg-[var(--fg)]/5 flex items-center justify-center overflow-hidden">
-             {/* Abstract Map Representation */}
-             <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(var(--fg) 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-             <motion.div 
-               animate={{ rotate: 360 }} 
-               transition={{ duration: 50, repeat: Infinity, ease: "linear" }}
-               className="w-64 h-64 border border-[var(--fg)]/30 rounded-full border-dashed flex items-center justify-center relative"
-             >
-                <div className="w-48 h-48 border border-[var(--fg)]/50 rounded-full absolute"></div>
-                <div className="w-32 h-32 border border-[var(--fg)] rounded-full absolute flex items-center justify-center">
-                  <div className="w-2 h-2 bg-[var(--fg)] rounded-full animate-ping"></div>
-                </div>
-                {/* Node Points */}
-                <div className="absolute top-0 w-3 h-3 bg-[var(--fg)] rounded-full shadow-[0_0_10px_var(--fg)]"></div>
-                <div className="absolute bottom-0 right-10 w-2 h-2 bg-[var(--fg)] rounded-full"></div>
-                <div className="absolute left-0 top-20 w-2 h-2 bg-[var(--fg)] rounded-full"></div>
-             </motion.div>
+          <div className="relative w-full border border-[var(--fg)]/20 bg-[var(--fg)]/5 flex items-center justify-center overflow-hidden rounded-xl shadow-2xl">
+            {/* Dynamic Route Video */}
+            <video className="w-full h-auto rounded-xl scale-105" playsInline autoPlay muted loop>
+              <source src="/Dynamicroute.mp4" type="video/mp4" />
+            </video>
           </div>
         </div>
       </div>
@@ -82,64 +70,10 @@ function Home() {
         <div className="max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
 
           {/* Literal Visual Representation (Left Side) */}
-          <div className="order-2 lg:order-1 relative h-[60vh] w-full flex flex-col items-center justify-center p-8 overflow-hidden border border-[var(--bg)]/20 bg-[var(--bg)]/5">
-             <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'linear-gradient(var(--bg) 1px, transparent 1px), linear-gradient(90deg, var(--bg) 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-             
-             <div className="relative z-10 flex flex-col md:flex-row gap-6 md:gap-12 items-center w-full max-w-md">
-                
-                {/* Incoming Individual Orders */}
-                <div className="flex flex-col gap-3 w-full md:w-1/2">
-                   <motion.div initial={{ x: -30, opacity: 0 }} whileInView={{ x: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="p-3 border border-[var(--bg)]/30 bg-[var(--fg)] text-[var(--bg)] shadow-md flex justify-between items-center">
-                     <div>
-                       <div className="text-[10px] font-bold uppercase">Order #892</div>
-                       <div className="text-[9px] opacity-60">Zone A • 1.2kg</div>
-                     </div>
-                     <div className="w-2 h-2 rounded-full bg-[var(--bg)]/50"></div>
-                   </motion.div>
-                   
-                   <motion.div initial={{ x: -30, opacity: 0 }} whileInView={{ x: 0, opacity: 1 }} transition={{ delay: 0.3 }} className="p-3 border border-[var(--bg)]/30 bg-[var(--fg)] text-[var(--bg)] shadow-md flex justify-between items-center">
-                     <div>
-                       <div className="text-[10px] font-bold uppercase">Order #893</div>
-                       <div className="text-[9px] opacity-60">Zone A • 0.8kg</div>
-                     </div>
-                     <div className="w-2 h-2 rounded-full bg-[var(--bg)]/50"></div>
-                   </motion.div>
-                   
-                   <motion.div initial={{ x: -30, opacity: 0 }} whileInView={{ x: 0, opacity: 1 }} transition={{ delay: 0.5 }} className="p-3 border border-[var(--bg)]/30 bg-[var(--fg)] text-[var(--bg)] shadow-md flex justify-between items-center">
-                     <div>
-                       <div className="text-[10px] font-bold uppercase">Order #895</div>
-                       <div className="text-[9px] opacity-60">Zone A • 2.1kg</div>
-                     </div>
-                     <div className="w-2 h-2 rounded-full bg-[var(--bg)]/50"></div>
-                   </motion.div>
-                </div>
-
-                {/* Merge Indicator */}
-                <div className="flex md:flex-col items-center justify-center rotate-90 md:rotate-0">
-                  <motion.div animate={{ x: [0, 5, 0] }} transition={{ repeat: Infinity, duration: 1.5 }} className="text-[var(--bg)] opacity-70 font-serif text-2xl italic">
-                     →
-                  </motion.div>
-                  <div className="text-[8px] uppercase tracking-widest mt-1 opacity-50 text-center hidden md:block">AI<br/>Merge</div>
-                </div>
-
-                {/* Output Grouped Batch */}
-                <div className="w-full md:w-1/2">
-                   <motion.div initial={{ scale: 0.9, opacity: 0 }} whileInView={{ scale: 1, opacity: 1 }} transition={{ delay: 0.8 }} className="p-5 border-2 border-[var(--bg)] bg-[var(--bg)] text-[var(--fg)] shadow-2xl relative overflow-hidden">
-                     {/* Success subtle background pulse */}
-                     <motion.div animate={{ opacity: [0, 0.05, 0] }} transition={{ repeat: Infinity, duration: 2 }} className="absolute inset-0 bg-green-500"></motion.div>
-                     
-                     <div className="text-xs font-bold uppercase tracking-widest mb-3 border-b border-[var(--fg)]/20 pb-2 relative z-10">Batch Z-A</div>
-                     <div className="space-y-2 relative z-10">
-                       <div className="flex justify-between text-[10px] opacity-80"><span>Orders:</span> <span>3 Merged</span></div>
-                       <div className="flex justify-between text-[10px] opacity-80"><span>Total Vol:</span> <span>4.1kg</span></div>
-                       <div className="flex justify-between text-[10px] font-bold mt-3 pt-3 border-t border-[var(--fg)]/20"><span>Cost Savings:</span> <span>-42%</span></div>
-                     </div>
-                   </motion.div>
-                </div>
-                
-             </div>
+          <div className="order-2 lg:order-1 relative w-full flex items-center justify-center overflow-hidden rounded-xl shadow-2xl border border-[var(--bg)]/20 bg-[var(--bg)]/5">
+             <img src="/batching.png" alt="Order Batching" className="w-full h-auto" />
           </div>
-          
+
           {/* Text Description (Right Side) */}
           <motion.div initial="hidden" whileInView="visible" viewport={{ once: true }} variants={{ visible: { transition: { staggerChildren: 0.1 } } }} className="space-y-8 order-1 lg:order-2">
             <motion.span variants={fadeUpVariant} className="font-sans text-[10px] uppercase tracking-[0.3em] border border-[var(--bg)]/20 px-4 py-2 rounded-full">
@@ -165,7 +99,7 @@ function Home() {
       <div className="w-full py-32 px-6 md:px-12 bg-[var(--bg)] relative z-10 border-t border-[var(--fg)]/10">
         <div className="max-w-[1400px] mx-auto text-center flex flex-col items-center mb-24">
           <motion.span initial="hidden" whileInView="visible" viewport={{ once: true }} variants={fadeUpVariant} className="font-sans text-[10px] uppercase tracking-[0.3em] border border-[var(--fg)]/20 px-4 py-2 rounded-full mb-8">
-              Core Module 03
+            Core Module 03
           </motion.span>
           <motion.h2 initial="hidden" whileInView="visible" viewport={{ once: true }} variants={fadeUpVariant} className="font-['Playfair_Display'] text-5xl md:text-7xl font-bold tracking-tighter max-w-3xl">
             Predict Delays Before They Happen.
@@ -178,7 +112,7 @@ function Home() {
             { title: "Proactive Alerts", val: "< 1s", desc: "Real-time SLA breach warnings based on traffic density." },
             { title: "Courier Data", val: "50k+", desc: "Historical delivery points analyzed for partner reliability." }
           ].map((stat, i) => (
-            <motion.div 
+            <motion.div
               key={i}
               initial="hidden" whileInView="visible" viewport={{ once: true }}
               variants={fadeUpVariant}
@@ -195,7 +129,7 @@ function Home() {
 
       {/* Final CTA */}
       <div className="w-full bg-[var(--fg)] text-[var(--bg)] px-6 md:px-12 py-32 relative z-10 flex flex-col items-center text-center">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
