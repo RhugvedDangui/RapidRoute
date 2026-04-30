@@ -588,6 +588,14 @@ async def predict_delivery_risk(order: OrderDispatch):
     temperature = current_weather.get("temperature_2m", 25.0)
     
     # ─────────────────────────────────────────────────────────────────────────
+    # WEATHER HEURISTIC: Open-Meteo often aggressively predicts thunderstorms
+    # in India during summer even if it's completely dry.
+    # If it claims a storm/rain but precipitation is ~0, downgrade to Overcast.
+    # ─────────────────────────────────────────────────────────────────────────
+    if weather_code in [95, 96, 99, 61, 63, 65, 80, 81, 82] and rain_mm <= 0.2:
+        weather_code = 3  # Overcast (Code 3)
+    
+    # ─────────────────────────────────────────────────────────────────────────
     # STEP 1.5: Fetch Real-Time Traffic from TomTom (India-optimized!)
     # ─────────────────────────────────────────────────────────────────────────
     
@@ -680,17 +688,17 @@ async def predict_delivery_risk(order: OrderDispatch):
             risk_score += 0.15
         
         # Courier reliability impact
-        if order.courier_reliability_score < 0.5:
+        if courier_score < 0.5:
             risk_score += 0.3
-        elif order.courier_reliability_score < 0.7:
+        elif courier_score < 0.7:
             risk_score += 0.15
         
         # Distance impact
-        if order.distance_km > 30:
+        if distance_km > 30:
             risk_score += 0.1
         
         # Peak hour impact
-        if order.time_of_day in [8, 9, 10, 17, 18, 19, 20]:
+        if time_of_day in [8, 9, 10, 17, 18, 19, 20]:
             risk_score += 0.1
         
         # Traffic impact
@@ -700,7 +708,7 @@ async def predict_delivery_risk(order: OrderDispatch):
             risk_score += 0.15
         
         # Weekend reduces risk slightly
-        if order.is_weekend:
+        if is_weekend:
             risk_score -= 0.05
         
         # Cap at 1.0
