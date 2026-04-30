@@ -58,10 +58,12 @@ const geocodeAddress = async (address) => {
       };
     }
 
-    return { lat: null, lng: null };
+    // Fallback to hub coordinates if geocoding fails
+    console.warn(`Geocoding returned no results. Using fallback coordinates.`);
+    return { lat: 15.5494, lng: 73.8248 }; // Default Mapusa Hub
   } catch (error) {
     console.error('Geocoding error:', error.message);
-    return { lat: null, lng: null };
+    return { lat: 15.5494, lng: 73.8248 }; // Default Mapusa Hub
   }
 };
 

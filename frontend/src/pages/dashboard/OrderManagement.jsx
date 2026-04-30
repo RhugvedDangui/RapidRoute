@@ -8,6 +8,16 @@ const OrderManagement = () => {
   const [batchingState, setBatchingState] = useState(null); // null | 'running' | 'success' | 'error'
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addingOrder, setAddingOrder] = useState(false);
+  const [newOrder, setNewOrder] = useState({
+    customer: '',
+    address: '',
+    city: 'Mapusa',
+    state: 'Goa',
+    pincode: '403507',
+    total: ''
+  });
 
   useEffect(() => {
     fetchOrders();
@@ -60,7 +70,7 @@ const OrderManagement = () => {
     if (selectedOrders.length === 0) return;
     setBatchingState('running');
     try {
-      const res = await fetch('http://localhost:3000/api/batch/run', {
+      const res = await fetch(`http://${window.location.hostname}:3000/api/batch/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIds: selectedOrders })
@@ -135,6 +145,52 @@ const OrderManagement = () => {
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const submitNewOrder = async (e) => {
+    e.preventDefault();
+    setAddingOrder(true);
+    
+    // Split customer name
+    const nameParts = newOrder.customer.split(' ');
+    const firstName = nameParts[0] || 'Manual';
+    const lastName = nameParts.slice(1).join(' ') || 'Customer';
+
+    // Generate random 5 digit ID
+    const randomId = Math.floor(10000 + Math.random() * 90000);
+
+    const payload = {
+      id: randomId,
+      total: newOrder.total || "0",
+      date_created: new Date().toISOString(),
+      shipping: {
+        first_name: firstName,
+        last_name: lastName,
+        address_1: newOrder.address,
+        city: newOrder.city,
+        state: newOrder.state,
+        postcode: newOrder.pincode,
+        country: "India"
+      }
+    };
+
+    try {
+      const res = await fetch(`http://${window.location.hostname}:3000/webhook/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('Failed to create order');
+      
+      setIsAddModalOpen(false);
+      setNewOrder({ customer: '', address: '', city: 'Mapusa', state: 'Goa', pincode: '403507', total: '' });
+      fetchOrders();
+    } catch (err) {
+      console.error(err);
+      alert('Error creating manual order');
+    } finally {
+      setAddingOrder(false);
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
       
@@ -146,7 +202,10 @@ const OrderManagement = () => {
             <p className="text-xs opacity-70 uppercase tracking-widest">Forward & Reverse Logistics Sync</p>
           </div>
           <div className="flex items-center space-x-4">
-            <button className="text-[10px] rounded-xl uppercase tracking-widest border border-[var(--fg)]/20 px-4 py-3 hover:bg-[var(--fg)] hover:text-[var(--bg)] transition-colors">
+            <button 
+              onClick={() => setIsAddModalOpen(true)}
+              className="text-[10px] rounded-xl uppercase tracking-widest border border-[var(--fg)]/20 px-4 py-3 hover:bg-[var(--fg)] hover:text-[var(--bg)] transition-colors"
+            >
               + Add Manual
             </button>
             <button className="text-[10px] rounded-xl shadow-sm uppercase tracking-widest bg-[var(--fg)] text-[var(--bg)] px-4 py-3 hover:opacity-80 transition-opacity">
@@ -258,6 +317,104 @@ const OrderManagement = () => {
           </div>
         </div>
       </div>
+
+      {/* Add Manual Order Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-[var(--bg)]/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in p-4">
+          <div className="bg-[var(--card-bg)] border border-[var(--fg)]/10 rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
+            <button 
+              onClick={() => setIsAddModalOpen(false)}
+              className="absolute top-6 right-6 text-[var(--fg)]/50 hover:text-[var(--fg)]"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            
+            <h3 className="text-xl font-medium mb-1">Manual Order Entry</h3>
+            <p className="text-xs opacity-50 uppercase tracking-widest mb-6">Create order bypassing Shopify/WooCommerce</p>
+            
+            <form onSubmit={submitNewOrder} className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest opacity-50 mb-1">Customer Name</label>
+                <input 
+                  type="text" 
+                  required
+                  value={newOrder.customer}
+                  onChange={e => setNewOrder({...newOrder, customer: e.target.value})}
+                  className="w-full bg-[var(--bg)] border border-[var(--fg)]/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[var(--fg)] transition-colors"
+                  placeholder="Rahul Sharma"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest opacity-50 mb-1">Address Line</label>
+                <input 
+                  type="text" 
+                  required
+                  value={newOrder.address}
+                  onChange={e => setNewOrder({...newOrder, address: e.target.value})}
+                  className="w-full bg-[var(--bg)] border border-[var(--fg)]/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[var(--fg)] transition-colors"
+                  placeholder="Agnel Institute of Technology"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest opacity-50 mb-1">City</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newOrder.city}
+                    onChange={e => setNewOrder({...newOrder, city: e.target.value})}
+                    className="w-full bg-[var(--bg)] border border-[var(--fg)]/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[var(--fg)] transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest opacity-50 mb-1">Pincode</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newOrder.pincode}
+                    onChange={e => setNewOrder({...newOrder, pincode: e.target.value})}
+                    className="w-full bg-[var(--bg)] border border-[var(--fg)]/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[var(--fg)] transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest opacity-50 mb-1">State</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newOrder.state}
+                    onChange={e => setNewOrder({...newOrder, state: e.target.value})}
+                    className="w-full bg-[var(--bg)] border border-[var(--fg)]/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[var(--fg)] transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest opacity-50 mb-1">Order Total (₹)</label>
+                  <input 
+                    type="number" 
+                    value={newOrder.total}
+                    onChange={e => setNewOrder({...newOrder, total: e.target.value})}
+                    className="w-full bg-[var(--bg)] border border-[var(--fg)]/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-[var(--fg)] transition-colors"
+                    placeholder="499"
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={addingOrder}
+                className="w-full mt-4 bg-[var(--fg)] text-[var(--bg)] font-bold text-[10px] uppercase tracking-widest py-4 rounded-xl hover:opacity-90 transition-opacity"
+              >
+                {addingOrder ? 'Processing & Geocoding...' : 'Create & Geocode Order'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
