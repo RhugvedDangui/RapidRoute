@@ -149,9 +149,12 @@ export default function HomeScreen() {
       const orderIds = orders.map(o => o.id);
       
       try {
-        await fetch('https://bunion-transpose-tinkling.ngrok-free.dev/notify-customers', {
+        await fetch('https://bunion-transpose-tinkling.ngrok-free.dev/api/v1/notify-customers', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true'
+          },
           body: JSON.stringify({ batch_id: batch.id, order_ids: orderIds })
         });
       } catch (err) {
@@ -267,28 +270,27 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {orders.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>No Deliveries Today</Text>
-          <Text style={styles.emptyText}>
-            Pull down to refresh or check back later
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={orders}
-          renderItem={renderOrderCard}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#ffffff"
-            />
-          }
-        />
-      )}
+      <FlatList
+        data={orders}
+        renderItem={renderOrderCard}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={orders.length === 0 ? [styles.listContent, { flex: 1 }] : styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.text}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>No Deliveries Today</Text>
+            <Text style={styles.emptyText}>
+              Pull down to refresh or check back later
+            </Text>
+          </View>
+        }
+      />
     </View>
   );
 }

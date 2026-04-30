@@ -27,15 +27,28 @@ export default function HistoryScreen() {
 
   const fetchHistory = async () => {
     try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('driver_id', driver?.id)
-        .in('status', ['delivered', 'failed'])
-        .order('updated_at', { ascending: false });
+      const { data: batches, error: batchError } = await supabase
+        .from('batches')
+        .select('id')
+        .eq('driver_id', driver?.id);
 
-      if (error) throw error;
-      setHistory(data || []);
+      if (batchError) throw batchError;
+
+      const batchIds = batches?.map(b => b.id) || [];
+
+      if (batchIds.length > 0) {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .in('batch_id', batchIds)
+          .in('status', ['delivered', 'failed'])
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        setHistory(data || []);
+      } else {
+        setHistory([]);
+      }
     } catch (err) {
       console.warn('Error fetching history:', err);
     } finally {

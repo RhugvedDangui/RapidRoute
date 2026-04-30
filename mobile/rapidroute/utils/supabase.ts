@@ -35,7 +35,7 @@ export interface Order {
   lat: number;
   lng: number;
   total: number;
-  status: 'pending' | 'in_progress' | 'delivered' | 'failed';
+  status: 'pending' | 'dispatched' | 'out_for_delivery' | 'in_progress' | 'delivered' | 'failed';
   time_window: 'morning' | 'afternoon' | 'evening';
   created_at: string;
   batch_id?: string;
@@ -54,7 +54,7 @@ export interface Batch {
   estimated_cost: number;
   vehicle_id?: string;
   carbon_saved: number;
-  status: 'pending' | 'dispatched' | 'in_progress' | 'completed';
+  status: 'pending' | 'dispatched' | 'out_for_delivery' | 'in_progress' | 'completed';
   driver_id?: string;
 }
 

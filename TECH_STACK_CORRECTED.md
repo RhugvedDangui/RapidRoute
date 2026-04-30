@@ -39,7 +39,7 @@
 | **Weather delays** | Open-Meteo API | Rain, storm, visibility |
 | **Peak hour patterns** | Built-in multipliers | Indian city-specific patterns |
 | **Festival calendar** | Built-in data | Diwali, IPL, bandh detection |
-| **Final time estimate** | Combined calculation | Realistic Indian delivery time |
+| **Final time estimate** | Combined calculation | Realistic Indian delivery time | 
 
 ---
 
