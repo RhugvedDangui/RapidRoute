@@ -1,10 +1,13 @@
 """
 RapidRoute - Full Pipeline
-Runs both batching (Phase 1) and route optimization (Phase 2)
+Runs Phase 1 (batching) then Phase 2 (route optimisation).
+Must be run from any directory — resolves script paths automatically.
 """
 
 import sys
+import os
 import subprocess
+import argparse
 
 # Fix Windows console encoding for emoji support
 if sys.platform == 'win32':
@@ -12,54 +15,40 @@ if sys.platform == 'win32':
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
-print("\n" + "="*70)
-print("🚀 RapidRoute - Full Optimization Pipeline")
-print("="*70 + "\n")
+# Always resolve relative to this file's directory
+HERE = os.path.dirname(os.path.abspath(__file__))
 
-print("Phase 1: Intelligent Batching (K-Means)")
-print("-" * 70)
+parser = argparse.ArgumentParser(description="Run RapidRoute pipeline")
+parser.add_argument('--orders', type=str, help="Comma-separated list of order IDs to batch")
+args = parser.parse_args()
 
-# Run batching
-try:
+def run(script: str, pass_args=False):
+    """Run a script from the batching directory, streaming output live."""
+    cmd = [sys.executable, script]
+    if pass_args and args.orders:
+        cmd.extend(["--orders", args.orders])
+        
     result = subprocess.run(
-        [sys.executable, "batch_orders.py"],
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        check=True
+        cmd,
+        cwd=HERE,             # always run from batching/
+        # No capture_output — output streams directly to terminal in real-time
     )
-    print(result.stdout)
-except subprocess.CalledProcessError as e:
-    print(f"❌ Batching failed: {e}")
-    if e.stdout:
-        print(e.stdout)
-    if e.stderr:
-        print(e.stderr)
-    sys.exit(1)
+    if result.returncode != 0:
+        print(f"\n❌ {script} exited with code {result.returncode}. Aborting pipeline.")
+        sys.exit(result.returncode)
+
 
 print("\n" + "="*70)
-print("Phase 2: Route Optimization (OR-Tools TSP)")
-print("-" * 70)
+print("🚀 RapidRoute - Full Optimisation Pipeline")
+print("="*70)
 
-# Run route optimization
-try:
-    result = subprocess.run(
-        [sys.executable, "optimize_routes.py"],
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        check=True
-    )
-    print(result.stdout)
-except subprocess.CalledProcessError as e:
-    print(f"❌ Route optimization failed: {e}")
-    if e.stdout:
-        print(e.stdout)
-    if e.stderr:
-        print(e.stderr)
-    sys.exit(1)
+print("\nPhase 1: Intelligent Batching (K-Means + Capacity)")
+print("-" * 70)
+run("batch_orders.py", pass_args=True)
+
+print("\nPhase 2: Route Optimisation (OR-Tools TSP)")
+print("-" * 70)
+run("optimize_routes.py", pass_args=False)
 
 print("\n" + "="*70)
 print("✅ Full pipeline completed successfully!")

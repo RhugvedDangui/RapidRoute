@@ -1,31 +1,62 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { supabase } from '../../supabaseClient';
 
 const MESSAGES_INIT = [
-  { role: 'user', time: '10:42 AM', text: '"Optimize routes for today\'s 40 pending orders."' },
+  { role: 'user', time: '10:42 AM', text: '"Optimize routes for today\'s pending orders."' },
   {
     role: 'ai', time: '10:43 AM', text: null,
     lines: [
       { icon: '✅', label: 'Optimization Complete' },
-      { icon: '🗺️', label: '3 route batches created — 22% shorter avg distance.' },
-      { icon: '💸', label: 'Cost Saved: ₹450 (shared carrier network).' },
-      { icon: '⚠️', label: '2 delayed orders flagged — Rain in Zone 4.' },
+      { icon: '🗺️', label: 'Routes updated.' },
     ],
     cta: 'Reply CONFIRM to dispatch'
-  },
-  { role: 'user', time: '10:45 AM', text: 'CONFIRM' },
-  { role: 'ai', time: '10:45 AM', text: null,
-    lines: [
-      { icon: '🚀', label: 'All 40 orders dispatched successfully.' },
-      { icon: '📦', label: 'ETA updates sent to customers via WhatsApp.' },
-    ],
-    cta: null
-  },
+  }
 ];
 
 const Intelligence = () => {
   const [messages, setMessages] = useState(MESSAGES_INIT);
   const [input, setInput] = useState('');
+  const [predictions, setPredictions] = useState([]);
+  const [predicting, setPredicting] = useState(false);
   const bottomRef = useRef(null);
+
+  const fetchPredictions = async () => {
+    const { data } = await supabase
+      .from('delay_predictions')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (data) setPredictions(data);
+  };
+
+  useEffect(() => {
+    fetchPredictions();
+    const sub = supabase.channel('preds')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_predictions' }, () => fetchPredictions())
+      .subscribe();
+    return () => supabase.removeChannel(sub);
+  }, []);
+
+  const runPrediction = async () => {
+    setPredicting(true);
+    try {
+      const res = await fetch('http://localhost:3000/api/predict-all', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setMessages(prev => [
+        ...prev,
+        { role: 'user', time: now, text: 'Run Delay Prediction' },
+        { role: 'ai', time: now, text: null,
+          lines: [{ icon: '🤖', label: `Ran prediction on ${json.count} active orders.` }], cta: null },
+      ]);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setPredicting(false);
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,7 +90,7 @@ const Intelligence = () => {
           border: '1px solid rgba(239,68,68,0.2)',
         }}>
           <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#ef4444', display: 'inline-block', animation: 'pulse 2s infinite' }}></span>
-          2 High Risk Zones
+          {predictions.filter(p => p.risk_level === 'high').length} High Risk Orders
         </div>
       </div>
 
@@ -71,50 +102,63 @@ const Intelligence = () => {
           border: '1px solid var(--border-color)', padding: '24px',
           display: 'flex', flexDirection: 'column', gap: '12px',
           transition: 'background-color 0.3s ease',
+          height: '460px', overflowY: 'auto'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '12px', borderBottom: '1px solid var(--border-color)' }}>
-            <span style={{ fontSize: '13px', fontWeight: '600', opacity: 0.8 }}>Predictive Engine</span>
+            <span style={{ fontSize: '13px', fontWeight: '600', opacity: 0.8 }}>Predictive Engine (Live Models)</span>
+            <button 
+              onClick={runPrediction}
+              disabled={predicting}
+              className="text-[10px] font-bold uppercase tracking-widest bg-[var(--fg)] text-[var(--bg)] px-4 py-2 rounded-lg hover:opacity-90"
+            >
+              {predicting ? 'Running...' : 'Run Predictions'}
+            </button>
           </div>
+          
+          {predictions.length === 0 && (
+            <div className="text-center opacity-40 text-xs py-10 uppercase tracking-widest mt-10">No predictions run yet.</div>
+          )}
 
-          {/* High Risk Alert */}
-          <div style={{
-            border: '1px solid rgba(239,68,68,0.25)', backgroundColor: 'rgba(239,68,68,0.05)',
-            borderRadius: '12px', padding: '16px', position: 'relative', overflow: 'hidden',
-          }}>
-            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '3px', backgroundColor: '#ef4444', borderRadius: '12px 0 0 12px' }}></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <span style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444', fontSize: '9px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>HIGH RISK</span>
-              <span style={{ fontSize: '12px', fontWeight: '700' }}>Zone 4 — SLA Risk</span>
+          {predictions.map(pred => (
+            <div key={pred.id} style={{
+              border: `1px solid ${pred.risk_level === 'high' ? 'rgba(239,68,68,0.25)' : pred.risk_level === 'medium' ? 'rgba(234,179,8,0.25)' : 'rgba(34,197,94,0.25)'}`, 
+              backgroundColor: pred.risk_level === 'high' ? 'rgba(239,68,68,0.05)' : pred.risk_level === 'medium' ? 'rgba(234,179,8,0.05)' : 'rgba(34,197,94,0.05)',
+              borderRadius: '12px', padding: '16px', position: 'relative', overflow: 'hidden',
+              flexShrink: 0
+            }}>
+              <div style={{ 
+                position: 'absolute', left: 0, top: 0, bottom: 0, width: '3px', 
+                backgroundColor: pred.risk_level === 'high' ? '#ef4444' : pred.risk_level === 'medium' ? '#eab308' : '#22c55e', 
+                borderRadius: '12px 0 0 12px' 
+              }}></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span style={{ 
+                  backgroundColor: pred.risk_level === 'high' ? 'rgba(239,68,68,0.15)' : pred.risk_level === 'medium' ? 'rgba(234,179,8,0.15)' : 'rgba(34,197,94,0.15)', 
+                  color: pred.risk_level === 'high' ? '#ef4444' : pred.risk_level === 'medium' ? '#eab308' : '#22c55e', 
+                  fontSize: '9px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', letterSpacing: '0.08em', textTransform: 'uppercase' 
+                }}>
+                  {pred.risk_level} RISK ({(pred.risk_score * 100).toFixed(0)}%)
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: '700' }}>Order #{pred.order_id}</span>
+              </div>
+              <p style={{ fontSize: '11px', opacity: 0.8, lineHeight: 1.6, marginBottom: '4px' }}>
+                {pred.explanation}
+              </p>
+              <p style={{ fontSize: '10px', opacity: 0.5, lineHeight: 1.6, marginBottom: '12px' }}>
+                Weather: {pred.weather_description} ({pred.precipitation_mm}mm rain) | Distance: {pred.distance_km}km
+              </p>
+              <button style={{
+                fontSize: '10px', fontWeight: '700', letterSpacing: '0.06em', textTransform: 'uppercase',
+                backgroundColor: pred.risk_level === 'high' ? 'var(--fg)' : 'transparent', 
+                color: pred.risk_level === 'high' ? 'var(--bg)' : 'var(--fg)', 
+                padding: '7px 14px',
+                borderRadius: '8px', border: pred.risk_level === 'high' ? 'none' : '1px solid var(--border-color)', cursor: 'pointer',
+              }}>
+                {pred.suggested_action.substring(0, 40)}{pred.suggested_action.length > 40 ? '...' : ''}
+              </button>
             </div>
-            <p style={{ fontSize: '11px', opacity: 0.6, lineHeight: 1.6, marginBottom: '12px' }}>
-              Heavy rain forecasted from 2 PM. Deliveries likely delayed 45+ min based on historical patterns.
-            </p>
-            <button style={{
-              fontSize: '10px', fontWeight: '700', letterSpacing: '0.06em', textTransform: 'uppercase',
-              backgroundColor: 'var(--fg)', color: 'var(--bg)', padding: '7px 14px',
-              borderRadius: '8px', border: 'none', cursor: 'pointer',
-            }}>Trigger Reschedule</button>
-          </div>
+          ))}
 
-          {/* Warning Alert */}
-          <div style={{
-            border: '1px solid rgba(234,179,8,0.25)', backgroundColor: 'rgba(234,179,8,0.05)',
-            borderRadius: '12px', padding: '16px', position: 'relative', overflow: 'hidden',
-          }}>
-            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '3px', backgroundColor: '#eab308', borderRadius: '12px 0 0 12px' }}></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <span style={{ backgroundColor: 'rgba(234,179,8,0.15)', color: '#eab308', fontSize: '9px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>WARNING</span>
-              <span style={{ fontSize: '12px', fontWeight: '700' }}>Traffic Anomaly — NH-44</span>
-            </div>
-            <p style={{ fontSize: '11px', opacity: 0.6, lineHeight: 1.6, marginBottom: '12px' }}>
-              High density detected. Fleet batch #12 ETA extended by 22 mins.
-            </p>
-            <button style={{
-              fontSize: '10px', fontWeight: '700', letterSpacing: '0.06em', textTransform: 'uppercase',
-              backgroundColor: 'transparent', color: 'var(--fg)', padding: '7px 14px',
-              borderRadius: '8px', border: '1px solid var(--border-color)', cursor: 'pointer',
-            }}>Notify Customers</button>
-          </div>
         </div>
 
         {/* ── Copilot Chat ── */}
