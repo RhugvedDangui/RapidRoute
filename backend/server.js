@@ -117,6 +117,7 @@ app.post('/webhook/order', async (req, res) => {
       status: 'pending',
       time_window: timeWindow,
       created_at: dateCreated,
+      order_date: dateCreated,
       batch_id: null,
       // New columns
       weight_kg: parseFloat(weightKg) || 1.0,
@@ -394,6 +395,58 @@ app.patch('/api/drivers/:id', async (req, res) => {
   } catch (err) {
     console.error('Update driver error:', err);
     res.status(500).json({ error: 'Failed to update driver', details: err.message });
+  }
+});
+
+// POST /api/predict-all — Run delay prediction for all active orders
+app.post('/api/predict-all', async (req, res) => {
+  try {
+    // Fetch active orders
+    const { data: orders, error } = await supabaseAdmin
+      .from('orders')
+      .select('*')
+      .in('status', ['pending', 'batched', 'dispatched']);
+      
+    if (error) throw error;
+    if (!orders || orders.length === 0) {
+      return res.status(200).json({ success: true, message: 'No active orders to predict.', count: 0 });
+    }
+
+    const HUB_LAT = 15.3533;
+    const HUB_LNG = 73.9575;
+    
+    let successCount = 0;
+    
+    for (const order of orders) {
+      try {
+        // Build payload for FastAPI model
+        const payload = {
+          order_id: order.id.toString(),
+          origin_lat: HUB_LAT,
+          origin_lon: HUB_LNG,
+          dest_lat: order.lat || HUB_LAT,
+          dest_lon: order.lng || HUB_LNG,
+          courier_id: "default-courier",
+          courier_reliability_score: 0.8 // Override to avoid failing if no history
+        };
+        
+        await axios.post('https://dbb0-2401-4900-561f-c477-741e-8d29-738-63.ngrok-free.app/api/v1/predict-delay', payload, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        successCount++;
+      } catch (innerErr) {
+        console.error(`Failed to predict for order ${order.id}:`, innerErr.message);
+      }
+    }
+    
+    res.status(200).json({
+      success: true, 
+      message: `Ran delay prediction for ${successCount}/${orders.length} orders.`,
+      count: successCount
+    });
+  } catch (err) {
+    console.error('Predict all error:', err);
+    res.status(500).json({ error: 'Failed to run predictions', details: err.message });
   }
 });
 
