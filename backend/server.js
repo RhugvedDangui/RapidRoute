@@ -2,7 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const axios = require('axios');
-
+const { spawn } = require('child_process');
+const path = require('path');
 const cors = require('cors');
 
 const app = express();
@@ -182,11 +183,21 @@ app.patch('/orders/:id/pod', async (req, res) => {
   }
 });
 
-// POST /batches/:id/dispatch — manager approves batch, moves orders → dispatched
-// Status flow: pending → batched → dispatched → out_for_delivery (driver app) → delivered
+// POST /batches/:id/dispatch — Mark batch as dispatched
 app.post('/batches/:id/dispatch', async (req, res) => {
   const { id } = req.params;
+  const { driverId } = req.body || {};
   try {
+    // 1. Update batch status and assign driver
+    const updatePayload = { status: 'dispatched' };
+    if (driverId) updatePayload.driver_id = driverId;
+
+    const { error: batchErr } = await supabaseAdmin
+      .from('batches')
+      .update(updatePayload)
+      .eq('id', id);
+    if (batchErr) throw batchErr;
+
     const { data: orders, error: oErr } = await supabaseAdmin
       .from('orders')
       .select('id')
@@ -249,6 +260,140 @@ app.post('/batches/:id/start', async (req, res) => {
   } catch (err) {
     console.error('Start error:', err);
     res.status(500).json({ error: 'Start failed', details: err.message });
+  }
+});
+
+// DELETE /batches/:id — Delete a batch, its route, and reset its orders to 'pending'
+app.delete('/batches/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // 1. Reset orders: remove batch_id, set status back to 'pending'
+    const { error: ordErr } = await supabaseAdmin
+      .from('orders')
+      .update({ batch_id: null, status: 'pending' })
+      .eq('batch_id', id);
+    if (ordErr) throw ordErr;
+
+    // 2. Delete the route associated with this batch
+    const { error: routeErr } = await supabaseAdmin
+      .from('routes')
+      .delete()
+      .eq('batch_id', id);
+    if (routeErr) throw routeErr;
+
+    // 3. Delete the batch itself
+    const { error: batchErr } = await supabaseAdmin
+      .from('batches')
+      .delete()
+      .eq('id', id);
+    if (batchErr) throw batchErr;
+
+    console.log(`🗑️ Batch ${id} deleted — orders reset to pending`);
+    res.status(200).json({ success: true, message: `Batch ${id} deleted successfully` });
+  } catch (err) {
+    console.error('Delete batch error:', err);
+    res.status(500).json({ error: 'Failed to delete batch', details: err.message });
+  }
+});
+
+// POST /api/batch/run — Execute the Python batching pipeline
+app.post('/api/batch/run', (req, res) => {
+  const { orderIds } = req.body || {}; // array of order IDs
+  console.log('🚀 Triggering batching pipeline...');
+  
+  const args = ['run_full_pipeline.py'];
+  if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
+    console.log(`Filtering to ${orderIds.length} specific orders:`, orderIds.join(','));
+    args.push('--orders');
+    args.push(orderIds.join(','));
+  }
+
+  // Define the path to the batching folder
+  const batchingDir = path.join(__dirname, 'batching');
+
+  // We spawn the python script and don't block the HTTP response (run async)
+  // so the frontend doesn't hang. You could also await it if you want sync.
+  const pyProcess = spawn('python', args, { cwd: batchingDir });
+
+  pyProcess.stdout.on('data', (data) => console.log(`[Pipeline] ${data.toString()}`));
+  pyProcess.stderr.on('data', (data) => console.error(`[Pipeline ERR] ${data.toString()}`));
+
+  pyProcess.on('close', (code) => {
+    console.log(`[Pipeline] process exited with code ${code}`);
+  });
+
+  res.status(200).json({ 
+    success: true, 
+    message: 'Batching pipeline started in the background.',
+    target_orders: orderIds || 'all_pending'
+  });
+});
+
+// POST /api/vehicles — Create new vehicle
+app.post('/api/vehicles', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('vehicles')
+      .insert([req.body])
+      .select();
+    
+    if (error) throw error;
+    res.status(201).json({ success: true, vehicle: data[0] });
+  } catch (err) {
+    console.error('Create vehicle error:', err);
+    res.status(500).json({ error: 'Failed to create vehicle', details: err.message });
+  }
+});
+
+// PATCH /api/vehicles/:id — Update vehicle (active status, name, etc.)
+app.patch('/api/vehicles/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('vehicles')
+      .update(req.body)
+      .eq('id', id)
+      .select();
+    
+    if (error) throw error;
+    res.status(200).json({ success: true, vehicle: data[0] });
+  } catch (err) {
+    console.error('Update vehicle error:', err);
+    res.status(500).json({ error: 'Failed to update vehicle', details: err.message });
+  }
+});
+
+// POST /api/drivers — Create new driver
+app.post('/api/drivers', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('drivers')
+      .insert([req.body])
+      .select();
+    
+    if (error) throw error;
+    res.status(201).json({ success: true, driver: data[0] });
+  } catch (err) {
+    console.error('Create driver error:', err);
+    res.status(500).json({ error: 'Failed to create driver', details: err.message });
+  }
+});
+
+// PATCH /api/drivers/:id — Update driver (status, name, etc.)
+app.patch('/api/drivers/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('drivers')
+      .update(req.body)
+      .eq('id', id)
+      .select();
+    
+    if (error) throw error;
+    res.status(200).json({ success: true, driver: data[0] });
+  } catch (err) {
+    console.error('Update driver error:', err);
+    res.status(500).json({ error: 'Failed to update driver', details: err.message });
   }
 });
 

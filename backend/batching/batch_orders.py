@@ -15,9 +15,10 @@ import numpy as np
 import pandas as pd
 import requests
 from math import radians, sin, cos, sqrt, atan2, ceil
-from datetime import datetime
+from datetime import datetime, timezone
 from sklearn.cluster import KMeans
 from dotenv import load_dotenv
+import argparse
 
 # ── Windows UTF-8 fix ──────────────────────────────────────────────
 if sys.platform == "win32":
@@ -58,12 +59,15 @@ def haversine(lat1, lng1, lat2, lng2) -> float:
 # DATA FETCHING
 # ══════════════════════════════════════════════════════════════════
 
-def fetch_orders() -> pd.DataFrame:
+def fetch_orders(order_ids: list = None) -> pd.DataFrame:
     print("📦 Fetching pending orders...")
-    r = requests.get(
-        f"{SUPABASE_URL}/rest/v1/orders?status=eq.pending&select=*",
-        headers=HEADERS,
-    )
+    url = f"{SUPABASE_URL}/rest/v1/orders?status=eq.pending&select=*"
+    if order_ids:
+        # e.g. &id=in.(10001,10002)
+        ids_str = ",".join(order_ids)
+        url += f"&id=in.({ids_str})"
+
+    r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     data = r.json()
     if not data:
@@ -231,7 +235,7 @@ def save(final_batches: list):
         batch_row = {
             "id":                 batch_id,
             "total_orders":       len(batch_df),
-            "created_at":         datetime.utcnow().isoformat(),
+            "created_at":         datetime.now(timezone.utc).isoformat(),
             "estimated_distance": m["estimated_distance"],
             "estimated_time":     m["estimated_time"],
             "estimated_cost":     m["estimated_cost"],
@@ -266,6 +270,10 @@ def save(final_batches: list):
 # ══════════════════════════════════════════════════════════════════
 
 def run():
+    parser = argparse.ArgumentParser(description="Run RapidRoute Phase 1 Batching")
+    parser.add_argument('--orders', type=str, help="Comma-separated list of order IDs to batch")
+    args = parser.parse_args()
+
     print("\n" + "="*60)
     print("🚀 RapidRoute — Phase 1: Batching")
     print("="*60 + "\n")
@@ -274,7 +282,8 @@ def run():
         print("❌ Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env")
         return
 
-    orders   = fetch_orders()
+    order_ids = args.orders.split(',') if args.orders else None
+    orders    = fetch_orders(order_ids)
     if orders.empty:
         return
 

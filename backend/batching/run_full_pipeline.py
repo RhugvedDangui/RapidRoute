@@ -7,6 +7,7 @@ Must be run from any directory — resolves script paths automatically.
 import sys
 import os
 import subprocess
+import argparse
 
 # Fix Windows console encoding for emoji support
 if sys.platform == 'win32':
@@ -17,10 +18,18 @@ if sys.platform == 'win32':
 # Always resolve relative to this file's directory
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-def run(script: str):
+parser = argparse.ArgumentParser(description="Run RapidRoute pipeline")
+parser.add_argument('--orders', type=str, help="Comma-separated list of order IDs to batch")
+args = parser.parse_args()
+
+def run(script: str, pass_args=False):
     """Run a script from the batching directory, streaming output live."""
+    cmd = [sys.executable, script]
+    if pass_args and args.orders:
+        cmd.extend(["--orders", args.orders])
+        
     result = subprocess.run(
-        [sys.executable, script],
+        cmd,
         cwd=HERE,             # always run from batching/
         # No capture_output — output streams directly to terminal in real-time
     )
@@ -35,11 +44,11 @@ print("="*70)
 
 print("\nPhase 1: Intelligent Batching (K-Means + Capacity)")
 print("-" * 70)
-run("batch_orders.py")
+run("batch_orders.py", pass_args=True)
 
 print("\nPhase 2: Route Optimisation (OR-Tools TSP)")
 print("-" * 70)
-run("optimize_routes.py")
+run("optimize_routes.py", pass_args=False)
 
 print("\n" + "="*70)
 print("✅ Full pipeline completed successfully!")

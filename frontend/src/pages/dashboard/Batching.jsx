@@ -60,11 +60,14 @@ const OrderRow = ({ order }) => {
 };
 
 // ── batch card ────────────────────────────────────────────────────
-const BatchCard = ({ batch, vehicle, orders, route, index }) => {
+const BatchCard = ({ batch, vehicle, orders, route, index, onRefresh, drivers }) => {
   const [open,        setOpen]        = useState(false);
   const [dispatching, setDispatching] = useState(false);
+  const [deleting,    setDeleting]    = useState(false);
+  const [showDriverModal, setShowDriverModal] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState('');
   const [dispatched,  setDispatched]  = useState(
-    // pre-mark as dispatched if all orders are already out_for_delivery
+    // pre-mark as dispatched if all orders are already out_for_delivery or dispatched
     orders.length > 0 && orders.every(o => ['dispatched','out_for_delivery','delivered'].includes(o.status))
   );
   const [dispatchMsg, setDispatchMsg] = useState(null);
@@ -74,21 +77,43 @@ const BatchCard = ({ batch, vehicle, orders, route, index }) => {
 
   const handleDispatch = async () => {
     if (dispatched || dispatching) return;
+    if (!selectedDriverId) {
+      alert("Please select a driver first!");
+      return;
+    }
     setDispatching(true);
     setDispatchMsg(null);
     try {
       const res = await fetch(`http://localhost:3000/batches/${batch.id}/dispatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driverId: selectedDriverId })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Dispatch failed');
       setDispatched(true);
+      setShowDriverModal(false);
       setDispatchMsg(`🚚 ${json.dispatched_orders} orders dispatched!`);
     } catch (e) {
       setDispatchMsg(`❌ ${e.message}`);
     } finally {
       setDispatching(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete batch ${batch.id}? Orders will be reset to pending.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`http://localhost:3000/batches/${batch.id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Delete failed');
+      
+      // Manually trigger a UI refresh instead of relying solely on webhooks
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      alert(`Error deleting batch: ${e.message}`);
+      setDeleting(false);
     }
   };
 
@@ -196,7 +221,10 @@ const BatchCard = ({ batch, vehicle, orders, route, index }) => {
               {/* dispatch button */}
               <div style={{ display: 'flex', gap: '10px', marginTop: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
-                  onClick={handleDispatch}
+                  onClick={() => {
+                    if (dispatched) return;
+                    setShowDriverModal(true);
+                  }}
                   disabled={dispatching || dispatched}
                   style={{
                     background: dispatched ? 'rgba(74,222,128,0.15)' : 'var(--fg)',
@@ -217,6 +245,19 @@ const BatchCard = ({ batch, vehicle, orders, route, index }) => {
                   fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em',
                   cursor: 'pointer',
                 }}>View Route</button>
+                <button 
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  style={{
+                    background: 'transparent', color: '#ef4444',
+                    border: '1px solid rgba(239,68,68,0.3)',
+                    borderRadius: '10px', padding: '10px 20px', fontSize: '11px',
+                    fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em',
+                    cursor: deleting ? 'default' : 'pointer',
+                    opacity: deleting ? 0.5 : 1, transition: 'all 0.2s'
+                  }}>
+                  {deleting ? 'Deleting...' : 'Delete'}
+                </button>
                 {dispatchMsg && (
                   <span style={{ fontSize: '11px', opacity: 0.7 }}>{dispatchMsg}</span>
                 )}
@@ -225,6 +266,73 @@ const BatchCard = ({ batch, vehicle, orders, route, index }) => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Dispatch Modal ── */}
+      <AnimatePresence>
+        {showDriverModal && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', padding: '20px'
+          }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{
+                background: 'var(--card-bg)', border: '1px solid var(--border-color)',
+                borderRadius: '20px', padding: '30px', width: '100%', maxWidth: '400px',
+                boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+              }}
+            >
+              <h3 style={{ margin: '0 0 10px', fontSize: '18px', fontWeight: '700' }}>Assign Driver & Dispatch</h3>
+              <p style={{ margin: '0 0 20px', fontSize: '12px', opacity: 0.6 }}>
+                Vehicle <strong>{vname}</strong> is assigned. Please select an available driver to take this batch.
+              </p>
+              
+              <select 
+                value={selectedDriverId}
+                onChange={e => setSelectedDriverId(e.target.value)}
+                style={{
+                  width: '100%', padding: '12px 16px', borderRadius: '12px',
+                  background: 'var(--dashboard-bg)', border: '1px solid var(--border-color)',
+                  color: 'var(--fg)', fontSize: '13px', outline: 'none', marginBottom: '24px'
+                }}
+              >
+                <option value="" disabled>Select an available driver...</option>
+                {drivers.filter(d => d.status === 'available').map(d => (
+                  <option key={d.id} value={d.id}>{d.name} ({d.phone})</option>
+                ))}
+              </select>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button 
+                  onClick={() => setShowDriverModal(false)}
+                  style={{
+                    background: 'transparent', color: 'var(--fg)', border: '1px solid var(--border-color)',
+                    borderRadius: '10px', padding: '10px 20px', fontSize: '11px',
+                    fontWeight: '600', textTransform: 'uppercase', cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleDispatch}
+                  disabled={!selectedDriverId || dispatching}
+                  style={{
+                    background: 'var(--fg)', color: 'var(--bg)', border: 'none',
+                    borderRadius: '10px', padding: '10px 20px', fontSize: '11px',
+                    fontWeight: '700', textTransform: 'uppercase', cursor: !selectedDriverId ? 'not-allowed' : 'pointer',
+                    opacity: !selectedDriverId || dispatching ? 0.5 : 1
+                  }}
+                >
+                  {dispatching ? 'Dispatching...' : 'Confirm Dispatch'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </motion.div>
   );
 };
@@ -238,6 +346,7 @@ export default function Batching() {
   const [vehicles, setVehicles] = useState({});
   const [orders,   setOrders]   = useState({});
   const [routes,   setRoutes]   = useState({});
+  const [drivers,  setDrivers]  = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState(null);
   const [filter,   setFilter]   = useState('all');
@@ -253,15 +362,16 @@ export default function Batching() {
 
   const fetchAll = async () => {
     try {
-      const [bRes, vRes, oRes, rRes] = await Promise.all([
+      const [bRes, vRes, oRes, rRes, dRes] = await Promise.all([
         supabase.from('batches').select('*').order('created_at', { ascending: false }),
         supabase.from('vehicles').select('*'),
         supabase.from('orders').select('*').not('batch_id', 'is', null),
         supabase.from('routes').select('*'),
+        supabase.from('drivers').select('*'),
       ]);
 
       // Surface any RLS / network errors
-      const errs = [bRes, vRes, oRes, rRes].map(r => r.error).filter(Boolean);
+      const errs = [bRes, vRes, oRes, rRes, dRes].map(r => r.error).filter(Boolean);
       if (errs.length) {
         const msg = errs.map(e => e.message).join('; ');
         console.error('Supabase fetch errors:', msg);
@@ -288,6 +398,7 @@ export default function Batching() {
       setVehicles(vMap);
       setOrders(oMap);
       setRoutes(rMap);
+      setDrivers(dRes.data || []);
       setError(null);
     } catch (e) {
       console.error('Batching fetch error:', e.message);
@@ -385,6 +496,8 @@ export default function Batching() {
               vehicle={vehicles[b.vehicle_id] || null}
               orders={orders[b.id] || []}
               route={routes[b.id] || null}
+              drivers={drivers}
+              onRefresh={fetchAll}
             />
           ))}
         </div>

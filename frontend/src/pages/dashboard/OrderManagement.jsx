@@ -4,6 +4,8 @@ import { supabase } from '../../supabaseClient';
 const OrderManagement = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedOrders, setSelectedOrders] = useState([]);
+  const [batchingState, setBatchingState] = useState(null); // null | 'running' | 'success' | 'error'
 
   useEffect(() => {
     fetchOrders();
@@ -34,6 +36,43 @@ const OrderManagement = () => {
       console.error('Error fetching orders:', err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSelectOrder = (id) => {
+    setSelectedOrders(prev => 
+      prev.includes(id) ? prev.filter(orderId => orderId !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    const pendingOrders = orders.filter(o => o.status === 'pending');
+    if (selectedOrders.length === pendingOrders.length) {
+      setSelectedOrders([]);
+    } else {
+      setSelectedOrders(pendingOrders.map(o => o.id));
+    }
+  };
+
+  const handleRunBatching = async () => {
+    if (selectedOrders.length === 0) return;
+    setBatchingState('running');
+    try {
+      const res = await fetch('http://localhost:3000/api/batch/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderIds: selectedOrders })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start batching');
+      
+      setBatchingState('success');
+      setTimeout(() => setBatchingState(null), 3000);
+      setSelectedOrders([]);
+    } catch (e) {
+      console.error(e);
+      setBatchingState('error');
+      setTimeout(() => setBatchingState(null), 3000);
     }
   };
 
@@ -77,7 +116,18 @@ const OrderManagement = () => {
         {/* Orders Table Section */}
         <div className="lg:col-span-2 bg-[var(--card-bg)] rounded-3xl border border-[var(--fg)]/10 shadow-sm p-8">
           <div className="flex items-center justify-between mb-8 pb-4 border-b border-[var(--fg)]/10">
-            <h3 className="text-lg font-medium">Forward Orders</h3>
+            <div className="flex items-center gap-4">
+              <h3 className="text-lg font-medium">Forward Orders</h3>
+              {selectedOrders.length > 0 && (
+                <button 
+                  onClick={handleRunBatching}
+                  disabled={batchingState === 'running'}
+                  className="bg-[var(--fg)] text-[var(--bg)] text-[10px] uppercase font-bold px-4 py-2 rounded-xl transition-all"
+                >
+                  {batchingState === 'running' ? 'Running...' : batchingState === 'success' ? 'Started!' : `Run Batching (${selectedOrders.length})`}
+                </button>
+              )}
+            </div>
             <div className="bg-[var(--fg)]/5 rounded-xl p-2 border border-[var(--fg)]/10">
               <svg className="w-6 h-6 text-[var(--fg)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             </div>
@@ -87,6 +137,14 @@ const OrderManagement = () => {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-[var(--fg)]/10 text-[9px] uppercase tracking-widest opacity-50">
+                  <th className="p-4 font-normal w-10">
+                    <input 
+                      type="checkbox" 
+                      onChange={handleSelectAll}
+                      checked={orders.filter(o => o.status === 'pending').length > 0 && selectedOrders.length === orders.filter(o => o.status === 'pending').length}
+                      className="accent-[var(--fg)]"
+                    />
+                  </th>
                   <th className="p-4 font-normal">Order ID</th>
                   <th className="p-4 font-normal">Customer</th>
                   <th className="p-4 font-normal">Address / Pin</th>
@@ -110,6 +168,16 @@ const OrderManagement = () => {
                 ) : (
                   orders.map(order => (
                     <tr key={order.id} className="border-b border-[var(--fg)]/5 hover:bg-[var(--fg)]/5 transition-colors">
+                      <td className="p-4">
+                        {order.status === 'pending' && (
+                          <input 
+                            type="checkbox" 
+                            checked={selectedOrders.includes(order.id)}
+                            onChange={() => handleSelectOrder(order.id)}
+                            className="accent-[var(--fg)]"
+                          />
+                        )}
+                      </td>
                       <td className="p-4 font-medium">ORD-{order.id}</td>
                       <td className="p-4">{order.customer || 'Unknown'}</td>
                       <td className="p-4 opacity-70 max-w-[150px] truncate" title={order.address}>{order.address || 'N/A'}</td>

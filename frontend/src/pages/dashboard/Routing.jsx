@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '../../supabaseClient';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 
 const vehicleIcon = (type) => {
   if (type === 'bike') return '🏍️';
@@ -13,7 +15,9 @@ const Routing = () => {
   const [batches, setBatches]   = useState([]);
   const [vehicles, setVehicles] = useState({});   // map: id → vehicle
   const [routes, setRoutes]     = useState({});   // map: batch_id → route
+  const [ordersMap, setOrdersMap]= useState({});  // map: order_id → order
   const [loading, setLoading]   = useState(true);
+  const [selectedBatchId, setSelectedBatchId] = useState(null);
 
   useEffect(() => {
     fetchAll();
@@ -48,6 +52,13 @@ const Routing = () => {
         .select('*');
       if (rErr) throw rErr;
 
+      // Fetch orders (to show customer details on map)
+      const { data: oData, error: oErr } = await supabase
+        .from('orders')
+        .select('*')
+        .not('batch_id', 'is', null);
+      if (oErr) throw oErr;
+
       // Build lookup maps
       const vMap = {};
       (vData || []).forEach(v => { vMap[v.id] = v; });
@@ -55,9 +66,13 @@ const Routing = () => {
       const rMap = {};
       (rData || []).forEach(r => { rMap[r.batch_id] = r; });
 
+      const oMap = {};
+      (oData || []).forEach(o => { oMap[o.id] = o; });
+
       setBatches(batchData || []);
       setVehicles(vMap);
       setRoutes(rMap);
+      setOrdersMap(oMap);
     } catch (err) {
       console.error('Error fetching routing data:', err.message);
     } finally {
@@ -83,10 +98,10 @@ const Routing = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 gap-8">
 
         {/* ── Batches List ─────────────────────────────────── */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6">
           {loading ? (
             <div className="text-center opacity-50 text-[10px] uppercase tracking-widest py-8">
               Loading batches...
@@ -192,14 +207,16 @@ const Routing = () => {
 
                   {/* Actions */}
                   <div className="flex gap-3 flex-wrap">
-                    <button className="text-[10px] font-medium uppercase tracking-widest border border-[var(--fg)]/20 rounded-xl px-6 py-3 hover:bg-[var(--fg)] hover:text-[var(--bg)] transition-colors shadow-sm">
-                      Approve & Dispatch
+                    <button 
+                      onClick={() => setSelectedBatchId(selectedBatchId === batch.id ? null : batch.id)}
+                      className={`text-[10px] font-medium uppercase tracking-widest border rounded-xl px-6 py-3 transition-colors ${
+                        selectedBatchId === batch.id 
+                          ? 'bg-[var(--fg)] text-[var(--bg)] border-[var(--fg)]'
+                          : 'border-[var(--fg)]/20 text-[var(--fg)] hover:bg-[var(--fg)]/10'
+                      }`}
+                    >
+                      {selectedBatchId === batch.id ? 'Hide Route' : 'View on Map'}
                     </button>
-                    {!vehicle && (
-                      <button className="text-[10px] font-medium uppercase tracking-widest border border-yellow-500/40 text-yellow-500 rounded-xl px-6 py-3 hover:bg-yellow-500/10 transition-colors">
-                        Assign Vehicle
-                      </button>
-                    )}
                   </div>
                 </div>
               );
@@ -207,76 +224,129 @@ const Routing = () => {
           )}
         </div>
 
-        {/* ── Constraints Panel ────────────────────────────── */}
-        <div className="bg-[var(--card-bg)] rounded-3xl border border-[var(--fg)]/10 shadow-sm p-8 flex flex-col">
-          <div className="flex items-center justify-between mb-8 pb-4 border-b border-[var(--fg)]/10">
-            <h3 className="text-lg font-medium">Constraints</h3>
-            <div className="bg-[var(--fg)]/5 rounded-xl p-2 border border-[var(--fg)]/10">
-              <svg className="w-5 h-5 text-[var(--fg)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-          </div>
+      </div>
 
-          <div className="space-y-3 text-xs flex-1">
-            <label className="flex items-center gap-4 rounded-xl border border-[var(--fg)]/10 p-4 hover:bg-[var(--fg)]/5 cursor-pointer transition-colors shadow-sm">
-              <input type="checkbox" defaultChecked className="accent-[var(--fg)] w-4 h-4 rounded" />
-              Respect Time Windows
-            </label>
-            <label className="flex items-center gap-4 rounded-xl border border-[var(--fg)]/10 p-4 hover:bg-[var(--fg)]/5 cursor-pointer transition-colors shadow-sm">
-              <input type="checkbox" defaultChecked className="accent-[var(--fg)] w-4 h-4 rounded" />
-              Respect Vehicle Capacity
-            </label>
-            <label className="flex items-center gap-4 rounded-xl border border-[var(--fg)]/10 p-4 hover:bg-[var(--fg)]/5 cursor-pointer transition-colors shadow-sm">
-              <input type="checkbox" defaultChecked className="accent-[var(--fg)] w-4 h-4 rounded" />
-              Avoid Toll Roads
-            </label>
-            <label className="flex items-center gap-4 rounded-xl border border-[var(--fg)]/10 p-4 hover:bg-[var(--fg)]/5 cursor-pointer transition-colors shadow-sm">
-              <input type="checkbox" defaultChecked className="accent-[var(--fg)] w-4 h-4 rounded" />
-              Combine Return Pickups
-            </label>
-            <label className="flex items-center gap-4 rounded-xl border border-[var(--fg)]/10 p-4 hover:bg-[var(--fg)]/5 cursor-pointer transition-colors shadow-sm">
-              <input type="checkbox" className="accent-[var(--fg)] w-4 h-4 rounded" />
-              Avoid Highways (2W)
-            </label>
-          </div>
-
-          {/* Animated route preview */}
-          <div className="mt-8 rounded-2xl overflow-hidden border border-[var(--fg)]/10 h-48 relative flex items-center justify-center bg-[var(--fg)]/5 shadow-inner">
-            <svg className="absolute inset-0 w-full h-full pointer-events-none z-10" xmlns="http://www.w3.org/2000/svg">
-              <motion.path
-                initial={{ pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={{ duration: 2, repeat: Infinity, repeatType: 'loop', ease: 'linear' }}
-                d="M 30 120 L 80 60 L 140 90 L 200 40 L 250 100"
-                stroke="var(--fg)" strokeWidth="2" fill="none" strokeDasharray="6 6"
-              />
-            </svg>
-            <div className="text-[10px] font-medium uppercase tracking-widest bg-[var(--card-bg)]/90 backdrop-blur-md rounded-full shadow-sm px-4 py-2 relative z-20">
-              Live Map Feed
-            </div>
-          </div>
-
-          {/* Fleet summary */}
-          {Object.values(vehicles).length > 0 && (
-            <div className="mt-6 pt-6 border-t border-[var(--fg)]/10">
-              <p className="text-[9px] uppercase tracking-widest opacity-50 mb-3">Active Fleet</p>
-              <div className="space-y-2">
-                {Object.values(vehicles).filter(v => v.active).map(v => (
-                  <div key={v.id} className="flex items-center justify-between text-xs rounded-xl border border-[var(--fg)]/10 px-3 py-2">
-                    <span>{vehicleIcon(v.type)} {v.name}</span>
-                    <span className="opacity-50">{v.capacity_kg} kg · ₹{v.cost_per_km}/km</span>
-                  </div>
-                ))}
+      {/* Map Modal Overlay */}
+      {selectedBatchId && (
+        <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-8 bg-black/60 backdrop-blur-sm animate-fade-in" style={{ zIndex: 9999 }}>
+          <div className="bg-[var(--card-bg)] border border-[var(--fg)]/10 rounded-3xl shadow-2xl w-full max-w-6xl h-[85vh] flex flex-col overflow-hidden relative">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-[var(--fg)]/10">
+              <div>
+                <h3 className="text-xl font-bold">Route Map: {selectedBatchId}</h3>
+                <p className="text-[10px] uppercase tracking-widest opacity-60 mt-1">Interactive OpenStreetMap Feed</p>
+              </div>
+              <div className="flex items-center gap-4">
+                {(() => {
+                  const route = routes[selectedBatchId];
+                  if (!route) return null;
+                  const orderSeq = typeof route.order_sequence === 'string' ? JSON.parse(route.order_sequence) : (route.order_sequence || []);
+                  const polyCoords = typeof route.polyline === 'string' ? JSON.parse(route.polyline) : (route.polyline || []);
+                  
+                  const latlngs = polyCoords.map(p => [p.lat, p.lng]);
+                  const waypoints = [];
+                  orderSeq.forEach(orderId => {
+                    const order = ordersMap[orderId];
+                    if (order && order.lat && order.lng) waypoints.push(`${order.lat},${order.lng}`);
+                  });
+                  
+                  if (waypoints.length > 0) {
+                    const hub = [15.3533, 73.9575];
+                    const gmapUrl = `https://www.google.com/maps/dir/?api=1&origin=${hub[0]},${hub[1]}&destination=${hub[0]},${hub[1]}&waypoints=${waypoints.join('|')}&travelmode=driving`;
+                    return (
+                      <a href={gmapUrl} target="_blank" rel="noopener noreferrer" 
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-colors shadow-md">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></svg>
+                        Open in Google Maps
+                      </a>
+                    );
+                  }
+                  return null;
+                })()}
+                
+                <button 
+                  onClick={() => setSelectedBatchId(null)}
+                  className="w-10 h-10 rounded-full bg-[var(--fg)]/5 hover:bg-[var(--fg)]/10 flex items-center justify-center transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
               </div>
             </div>
-          )}
-        </div>
 
-      </div>
+            {/* Map Area */}
+            <div className="flex-1 relative z-0">
+              <MapContainer center={[15.3533, 73.9575]} zoom={12} style={{ height: '100%', width: '100%' }}>
+                <TileLayer
+                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                  attribution='&copy; OSM'
+                />
+                {(() => {
+                  const batch = batches.find(b => b.id === selectedBatchId);
+                  const route = routes[selectedBatchId];
+                  if (!batch || !route) return null;
+                  
+                  try {
+                    const orderSeq = typeof route.order_sequence === 'string' ? JSON.parse(route.order_sequence) : (route.order_sequence || []);
+                    let polyCoords = typeof route.polyline === 'string' ? JSON.parse(route.polyline) : (route.polyline || []);
+                    
+                    let latlngs = polyCoords.map(p => [p.lat, p.lng]);
+                    
+                    // Fallback: If polyline is missing, build it from ordersMap
+                    if (latlngs.length < 2) {
+                      const hub = [15.3533, 73.9575];
+                      latlngs = [hub];
+                      orderSeq.forEach(orderId => {
+                        const order = ordersMap[orderId];
+                        if (order && order.lat && order.lng) latlngs.push([order.lat, order.lng]);
+                      });
+                      latlngs.push(hub);
+                    }
+                    
+                    if (latlngs.length < 2) return null;
+
+                    return (
+                      <React.Fragment>
+                        <Polyline positions={latlngs} color="#3b82f6" weight={5} opacity={0.8} />
+                        {latlngs.map((coord, idx) => {
+                          const isHub = idx === 0 || idx === latlngs.length - 1;
+                          const orderId = !isHub ? orderSeq[idx - 1] : null;
+                          const order = orderId ? ordersMap[orderId] : null;
+
+                          return (
+                            <CircleMarker 
+                              key={idx} center={coord} radius={isHub ? 8 : 6} 
+                              fillColor={isHub ? '#000' : '#3b82f6'} color="#fff" weight={2} fillOpacity={1}
+                            >
+                              <Tooltip permanent direction="top">
+                                <div className="text-xs font-['Poppins'] text-gray-800">
+                                  {isHub ? (
+                                    <strong>{idx === 0 ? '🏭 Warehouse Hub (Start)' : '🏭 Warehouse Hub (End)'}</strong>
+                                  ) : (
+                                    <>
+                                      <strong>Stop {idx}</strong><br/>
+                                      {order && <><span className="opacity-70">Order:</span> #{orderId}<br/>{order.customer}</>}
+                                    </>
+                                  )}
+                                </div>
+                              </Tooltip>
+                            </CircleMarker>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  } catch (e) {
+                    console.error("Error drawing map", e);
+                    return null;
+                  }
+                })()}
+              </MapContainer>
+            </div>
+            
+          </div>
+        </div>
+      )}
+      
     </div>
   );
 };

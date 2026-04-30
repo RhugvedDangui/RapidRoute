@@ -24,6 +24,7 @@ const navTabs = [
   { id: 'Delays & Risks', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z' },
   { id: 'Costs',          icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
   { id: 'Analytics',      icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+  { id: 'Fleet',          icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
   { id: 'Returns',        icon: 'M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6' },
 ];
 const bottomTabs = [
@@ -39,6 +40,7 @@ const renderPage = (tab, theme) => {
     case 'Delays & Risks': return <Intelligence />;
     case 'Analytics':      return <Analytics />;
     case 'Batching':       return <Batching />;
+    case 'Fleet':          return <Fleet />;
     case 'Costs':          return <CourierPortal />;
     case 'Returns':        return <Returns />;
     case 'Team':           return <Team />;
@@ -69,7 +71,7 @@ const NavBtn = ({ tab, active, onClick }) => (
 );
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState('Dashboard');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('rr-tab') || 'Dashboard');
   const [theme, setTheme] = useState(() => localStorage.getItem(STORAGE_KEY) || 'dark');
 
   useEffect(() => {
@@ -77,6 +79,10 @@ export default function Dashboard() {
     document.documentElement.classList.toggle('light', theme === 'light');
     localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('rr-tab', activeTab);
+  }, [activeTab]);
 
   const toggle = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
